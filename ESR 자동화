@@ -1,0 +1,361 @@
+
+
+async function main(workbook: ExcelScript.Workbook) {
+
+
+    const sourceSheets = ["ESR(Stationary)", "ESR(Rotating)", "ESR(Instrument)", "ESR(Electrical)", "ESR(Piping)", "ESR(Piping UG)", "ESR(Novation)"];
+    const targetPOs = workbook.getWorksheet("esrPO");
+    const targetItems = workbook.getWorksheet("esrItem");
+
+    let POs: PO[] = new Array;
+    let Items: Item[] = new Array;
+    let mapPOs: PO[] = new Array;
+    let mapItems: Item[] = new Array;
+
+    let mapPOSheet: ExcelScript.Worksheet = workbook.getWorksheet("mapPO");
+    let mapItemSheet: ExcelScript.Worksheet = workbook.getWorksheet("mapItem");
+    let maxPOSheetCnt: number = 7;
+    let maxPOColumnCnt: number = 15;
+    let maxItemSheetCnt: number = 7;
+    let maxItemColumnCnt: number = 12;
+
+    console.log("read mapPO");
+    let mapPOSheetData: string[][] = mapPOSheet.getRange("A1:O8").getTexts();
+
+    console.log("read mapPO2")
+    for (let i = 1; i <= maxPOSheetCnt; i++) {
+        mapPOs.push(readMapPO(mapPOSheetData, i, maxPOColumnCnt))
+    }
+
+    console.log("read PO data")
+    for (const sheetName of sourceSheets) {
+        const sheet = workbook.getWorksheet(sheetName);
+
+        let mapPO: PO = getMapPO(sheetName, mapPOs);
+        if (!mapPO) {
+            console.log(`Error: mapPO is undefined for sheet ${sheetName}`);
+            continue;
+        } readMapItem
+        let poSheetData: string[][] = sheet.getRange("A1:BZ301").getTexts();
+        for (let i = 0; i < 300 - 5; i++) {
+            let v: string = poSheetData[i + 5][1];
+            if (v.startsWith("FGIP") || v.startsWith("ARAM") || v.startsWith("PO")) {
+                POs.push(readPO(sheet.getName(), mapPO, poSheetData, i + 5));
+            }
+
+        }
+    }
+
+    console.log("write PO data", POs.length);
+    writePOData(targetPOs, POs);
+
+    //===========================================================
+    console.log("read mapItem");
+    let mapItemSheetData: string[][] = mapItemSheet.getRange("A1:L8").getTexts();
+    console.log("read mapItem2")
+    for (let i = 1; i <= maxItemSheetCnt; i++) {
+        mapItems.push(readMapItem(mapItemSheetData, i, maxItemColumnCnt));
+    }
+    for (let i = 0; i < mapItems.length; i++) {
+        console.log(mapItems[i])
+    }
+
+    console.log("read Item data")
+    for (const sheetName of sourceSheets) {
+        const sheet = workbook.getWorksheet(sheetName);
+        //if (sheetName !="ESR(Stationary)"){break};
+
+
+        let mapPO: PO = getMapPO(sheetName, mapPOs);
+        let mapItem: Item = getMapItem(sheetName, mapItems);
+        let ItemSheetData: ExcelScript.Range = sheet.getRange("A1:BZ301");
+        let usedRange = ItemSheetData.getUsedRange();
+        if (!usedRange) {
+            console.log("Used range is empty.");
+        } else {
+            let lastRow = usedRange.getLastRow();
+            let poMaxRowIndex = lastRow.getRowIndex();
+            console.log("Last row index (via getLastRow):", poMaxRowIndex);
+        }
+        let itemMaxRowIndex: number = ItemSheetData.getUsedRange().getRowCount();
+        let targetCell = ItemSheetData.getCell(itemMaxRowIndex - 1, 1);
+        if (targetCell.getText().trim() === "") {
+            // 대상 셀이 비어있으면, getUsedRange().getLastRow()로 대체
+            let poMaxRowIndex = ItemSheetData.getUsedRange().getLastRow().getRowIndex();
+            console.log("Target cell empty. Using last row index:", poMaxRowIndex);
+        } else {
+            let poMaxRowIndex = targetCell.getRangeEdge(ExcelScript.KeyboardDirection.up).getRowIndex();
+            console.log("poMaxRowIndex:", poMaxRowIndex);
+        }
+
+
+        console.log(sheetName, "POs.Length", POs.length);
+        for (let i = 0; i < POs.length; i++) {
+            console.log("PO sheetname", POs[i].shtName, "SheetName for Item", sheetName);
+            if (POs[i].shtName == sheetName) {
+                if (i < POs.length - 1) {
+                    console.log("PO and Item sheet name is same", sheetName, "i", i, "PO No", POs[i].poNo, POs[i].row, POs[i + 1].row);
+                } else {
+                    console.log("PO and Item sheet name is same", sheetName, "i", i, "PO No", POs[i].poNo, POs[i].row, "last PO");
+                }
+                let itemCount: number;
+                if (i == POs.length - 1 || POs[i].shtName != POs[i + 1].shtName) {
+                    itemCount = itemMaxRowIndex - POs[i].row - 1;
+                    console.log(POs[i].poNo, "itemMaxRowIndex", itemMaxRowIndex)
+                } else {
+                    itemCount = POs[i + 1].row - POs[i].row;
+                }
+                console.log("Item Count", itemCount);
+                for (let j = 0; j < itemCount; j++) {
+                    let tempItem: Item = readItem(sheetName, POs[i].poNo, mapItem, ItemSheetData.getTexts(), POs[i].row + j);
+                    if (tempItem.suborder.length > 0) {
+                        Items.push(tempItem);
+                    }
+                    //console.log(POs[i].poNo, Items[Items.length-1],Items.length);
+                }
+            }
+        }
+    }
+    console.log("Write Item data");
+    writeItemData(targetItems, Items);
+
+}
+
+
+class PO {
+    shtName: string;
+    row: number;
+    poNo: string;
+    poName: string;
+    poQty: string;
+    poPlacementDate: string;
+    contractualDeliveryDates: string;
+    incoterm: string;
+    ros: string;
+    aramcoChampion: string;
+    gsChampion: string;
+    vendorMgmt: string;
+    vendorPIC: string;
+    remarks: string;
+    areaOfConcern: string;
+}
+
+class Item {
+    shtName: string;
+    poNo: string;
+    suborder: string;
+    //subvendor: string;
+    poPlanDate: string;
+    poActDate: string;
+    deliveryPlanDate: string;
+    deliveryActDate: string;
+    manufacturing: string;
+}
+
+class POs {
+    list: PO[] = [];
+
+    add(po: PO) {
+        this.list.push(po);
+    }
+
+    item(n: number): PO {
+        return this.list[n];
+    }
+
+    count(): number {
+        return this.list.length;
+    }
+}
+
+class Items {
+    list: Item[] = [];
+
+    add(item: Item) {
+        this.list.push(item);
+    }
+
+    item(n: number): Item {
+        return this.list[n];
+    }
+
+    count(): number {
+        return this.list.length;
+    }
+}
+
+function getNextRowForPO(n: number, ws: ExcelScript.Worksheet): number {
+    for (let i = 1; i < 300; i++) {
+        if (ws.getCell(n + i, 1).getText().length > 0) {
+            return i
+        }
+    }
+}
+
+function writePOData(sheet: ExcelScript.Worksheet, oPOs: PO[]) {
+    const maxRows = 500;
+    const colCount = 15;
+
+    // 기존 데이터 삭제
+    sheet.getRangeByIndexes(1, 0, maxRows, colCount)
+        .clear(ExcelScript.ClearApplyTo.contents);
+
+    // 2차원 배열 생성
+    const data: (string | number | boolean | null)[][] = oPOs.map(po => [
+        po.shtName,
+        po.poNo,
+        po.poName,
+        po.poQty,
+        po.poPlacementDate,
+        po.contractualDeliveryDates,
+        po.incoterm,
+        po.ros,
+        po.aramcoChampion,
+        po.gsChampion,
+        po.vendorMgmt,
+        po.vendorPIC,
+        po.remarks,
+        po.areaOfConcern,
+        po.row
+    ]);
+
+    // 시트에 한 번에 쓰기
+    if (data.length > 0) {
+        sheet.getRangeByIndexes(1, 0, data.length, colCount)
+            .setValues(data);
+    }
+}
+
+
+function writeItemData(sheet: ExcelScript.Worksheet, oItems: Item[]) {
+    const maxRows = 500;
+    const colCount = 8;
+
+    // 기존 내용 삭제
+    sheet.getRangeByIndexes(1, 0, maxRows, colCount)
+        .clear(ExcelScript.ClearApplyTo.contents);
+
+    // 2차원 배열로 데이터 준비
+    const data: (string | number | boolean | null)[][] = oItems.map(item => [
+        item.shtName,
+        item.poNo,
+        item.suborder,
+        item.poPlanDate,
+        item.poActDate,
+        item.deliveryPlanDate,
+        item.deliveryActDate,
+        item.manufacturing
+    ]);
+
+    // 시트에 한 번에 작성
+    if (data.length > 0) {
+        sheet.getRangeByIndexes(1, 0, data.length, colCount)
+            .setValues(data);
+    }
+}
+
+
+function getMapPO(sheetName: string, mapPOs: PO[]): PO {
+    for (let i = 0; i < mapPOs.length; i++) {
+        console.log(`Checking: ${mapPOs[i].shtName} vs ${sheetName}`);
+        if (mapPOs[i].shtName.trim() === sheetName.trim()) {
+            console.log(`Matched: ${sheetName}`);
+            return mapPOs[i]
+        }
+    }
+}
+
+function getMapItem(sheetName: string, mapItems: Item[]): Item {
+    for (let i = 0; i < mapItems.length; i++) {
+        if (mapItems[i].shtName == sheetName) {
+            return mapItems[i]
+        }
+    }
+}
+
+function readMapPO(td: string[][], i: number, maxPOColumnCnt: number): PO {
+
+    let currentMapPO: PO = {
+        shtName: td[i][0],
+        poNo: columnNameToNumber(td[i][1]),
+        poName: columnNameToNumber(td[i][2]),
+        poQty: columnNameToNumber(td[i][3]),
+        poPlacementDate: columnNameToNumber(td[i][4]),
+        contractualDeliveryDates: columnNameToNumber(td[i][5]),
+        incoterm: columnNameToNumber(td[i][6]),
+        ros: columnNameToNumber(td[i][7]),
+        aramcoChampion: columnNameToNumber(td[i][8]),
+        gsChampion: columnNameToNumber(td[i][9]),
+        vendorMgmt: columnNameToNumber(td[i][10]),
+        vendorPIC: columnNameToNumber(td[i][11]),
+        remarks: columnNameToNumber(td[i][12]),
+        areaOfConcern: columnNameToNumber(td[i][13]),
+        row: parseInt(td[i][14])
+    }
+
+    return currentMapPO;
+};
+
+
+function readPO(sheetName: string, mapPO: PO, td: string[][], i: number): PO {
+    let currentPO: PO = {
+        shtName: sheetName,
+        poNo: td[i][parseInt(mapPO.poNo) - 1],
+        poName: td[i][parseInt(mapPO.poName) - 1],
+        poQty: td[i][parseInt(mapPO.poQty) - 1],
+        poPlacementDate: td[i][parseInt(mapPO.poPlacementDate) - 1],
+        contractualDeliveryDates: td[i][parseInt(mapPO.contractualDeliveryDates) - 1],
+        incoterm: td[i][parseInt(mapPO.incoterm) - 1],
+        ros: td[i][parseInt(mapPO.ros) - 1],
+        aramcoChampion: td[i][parseInt(mapPO.aramcoChampion) - 1],
+        gsChampion: td[i][parseInt(mapPO.gsChampion) - 1],
+        vendorMgmt: td[i][parseInt(mapPO.vendorMgmt) - 1],
+        vendorPIC: td[i][parseInt(mapPO.vendorPIC) - 1],
+        remarks: td[i][parseInt(mapPO.remarks) - 1],
+        areaOfConcern: td[i][parseInt(mapPO.areaOfConcern) - 1],
+        row: i + 1
+    };
+    return currentPO;
+
+}
+
+//===================================
+function readMapItem(td: string[][], i: number, maxItemColumnCnt: number): Item {
+
+    let currentMapItem: Item = {
+        shtName: td[i][0],
+        poNo: columnNameToNumber(td[i][1]),
+        suborder: columnNameToNumber(td[i][2]),
+        poPlanDate: columnNameToNumber(td[i][3]),
+        poActDate: columnNameToNumber(td[i][4]),
+        deliveryPlanDate: columnNameToNumber(td[i][5]),
+        deliveryActDate: columnNameToNumber(td[i][6]),
+        manufacturing: columnNameToNumber(td[i][7])
+    }
+    return currentMapItem;
+};
+
+
+function readItem(sheetName: string, poNo: string, mapItem: Item, td: string[][], i: number): Item {
+
+    let currentItem: Item = {
+        shtName: sheetName,
+        poNo: poNo,
+        suborder: td[i][parseInt(mapItem.suborder) - 1],
+        poPlanDate: td[i][parseInt(mapItem.poPlanDate) - 1],
+        poActDate: td[i][parseInt(mapItem.poActDate) - 1],
+        deliveryPlanDate: td[i][parseInt(mapItem.deliveryPlanDate) - 1],
+        deliveryActDate: td[i][parseInt(mapItem.deliveryActDate) - 1],
+        manufacturing: td[i][parseInt(mapItem.manufacturing) - 1]
+    };
+    return currentItem;
+
+}
+
+function columnNameToNumber(columnName: string): string {
+    let columnNumber = 0;
+    for (let i = 0; i < columnName.length; i++) {
+        columnNumber = columnNumber * 26 + (columnName.charCodeAt(i) - 'A'.charCodeAt(0) + 1);
+    }
+    return columnNumber.toString();
+}
